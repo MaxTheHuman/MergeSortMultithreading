@@ -26,100 +26,58 @@ std::vector<int> GenerateBigRandomVector(size_t size) {
     return big_vector;
 }
 
-void AsyncParallelMergeSort(std::vector<int>& numbers, size_t parallel_threads_number) {
-    auto begin_it = numbers.begin();
-    const auto numbers_end_it = numbers.end();
-    const auto part_size = numbers.size() / parallel_threads_number;
-    std::vector<std::future<void>> futures;
-    std::vector<std::pair<VectorIt, VectorIt>> parts_iters;
-    for (size_t i = 0; i < parallel_threads_number; ++i) {
-        auto end_it = (i == parallel_threads_number - 1)
-                        ? numbers_end_it
-                        : begin_it + part_size;
-        futures.push_back(std::async(std::launch::async, [begin_it, end_it] {
-                    std::sort(begin_it, end_it);
-                }
-            )
-        );
-        begin_it += part_size;
-        parts_iters.push_back(std::make_pair(begin_it, end_it));
+template<typename Iter>
+void AsyncParallelMergeSort(Iter begin, Iter end,
+                   unsigned int N = std::thread::hardware_concurrency())
+{
+    auto len = std::distance(begin, end);
+    if (len <= 1024)
+    {
+        std::sort(begin,end);
+        return;
     }
-
-    auto comp = [](
-        const std::pair<VectorIt, VectorIt>& left,
-        const std::pair<VectorIt, VectorIt>& right) {
-          return *left.first > *right.first;
-        };
-    std::priority_queue<std::pair<VectorIt, VectorIt>,
-        std::vector<std::pair<VectorIt, VectorIt>>, decltype(comp)> iters_heap(comp);
-    for (const auto& part_iters: parts_iters) {
-        iters_heap.push(part_iters);
+    
+    Iter mid = std::next(begin, len/2);
+    if (N > 1)
+    {
+        auto fn = std::async(AsyncParallelMergeSort<Iter>, begin, mid, N-2);
+        AsyncParallelMergeSort(mid, end, N-2);
+        fn.wait();
     }
-
-    for (auto& future : futures) {
-        future.get();
+    else
+    {
+        AsyncParallelMergeSort(begin, mid, 0);
+        AsyncParallelMergeSort(mid, end, 0);
     }
-
-    std::vector<int> result;
-    result.reserve(numbers.size());
-    while (!iters_heap.empty()) {
-        const auto curr_iters = iters_heap.top();
-        iters_heap.pop();
-        result.push_back(*curr_iters.first);
-        if (curr_iters.first != curr_iters.second) {
-            iters_heap.push(std::make_pair(curr_iters.first + 1, curr_iters.second));
-        }
-    }
-
-    numbers = result;
+    
+    std::inplace_merge(begin, mid, end);
 }
 
-void ThreadsParallelMergeSort(std::vector<int>& numbers, size_t parallel_threads_number) {
-    auto begin_it = numbers.begin();
-    const auto numbers_end_it = numbers.end();
-    const auto part_size = numbers.size() / parallel_threads_number;
-    std::vector<std::thread> threads;
-    std::vector<std::pair<VectorIt, VectorIt>> parts_iters;
-    for (size_t i = 0; i < parallel_threads_number; ++i) {
-        auto end_it = (i == parallel_threads_number - 1)
-                        ? numbers_end_it
-                        : begin_it + part_size;
-        threads.push_back(std::thread([begin_it, end_it] {
-                    std::sort(begin_it, end_it);
-                }
-            )
-        );
-        begin_it += part_size;
-        parts_iters.push_back(std::make_pair(begin_it, end_it));
+template<typename Iter>
+void ThreadsParallelMergeSort(Iter begin, Iter end,
+                   unsigned int N = std::thread::hardware_concurrency())
+{
+    auto len = std::distance(begin, end);
+    if (len <= 1024)
+    {
+        std::sort(begin,end);
+        return;
     }
-
-    auto comp = [](
-        const std::pair<VectorIt, VectorIt>& left,
-        const std::pair<VectorIt, VectorIt>& right) {
-          return *left.first > *right.first;
-        };
-    std::priority_queue<std::pair<VectorIt, VectorIt>,
-        std::vector<std::pair<VectorIt, VectorIt>>, decltype(comp)> iters_heap(comp);
-    for (const auto& part_iters: parts_iters) {
-        iters_heap.push(part_iters);
+    
+    Iter mid = std::next(begin, len/2);
+    if (N > 1)
+    {
+        auto fn = std::thread(ThreadsParallelMergeSort<Iter>, begin, mid, N-2);
+        ThreadsParallelMergeSort(mid, end, N-2);
+        fn.join();
     }
-
-    for (auto& thread : threads) {
-        thread.join();
+    else
+    {
+        ThreadsParallelMergeSort(begin, mid, 0);
+        ThreadsParallelMergeSort(mid, end, 0);
     }
-
-    std::vector<int> result;
-    result.reserve(numbers.size());
-    while (!iters_heap.empty()) {
-        const auto curr_iters = iters_heap.top();
-        iters_heap.pop();
-        result.push_back(*curr_iters.first);
-        if (curr_iters.first != curr_iters.second) {
-            iters_heap.push(std::make_pair(curr_iters.first + 1, curr_iters.second));
-        }
-    }
-
-    numbers = result;
+    
+    std::inplace_merge(begin, mid, end);
 }
 
 }
@@ -140,12 +98,12 @@ int main(int argc, char **argv) {
     {
         LOG_DURATION("multi-threaded async sort");
         auto vector_copy = big_vector;
-        AsyncParallelMergeSort(vector_copy, kParallelThreadsCount);
+        AsyncParallelMergeSort(vector_copy.begin(), vector_copy.end(), kParallelThreadsCount);
     }
     {
         LOG_DURATION("multi-threaded raw threads sort");
         auto vector_copy = big_vector;
-        ThreadsParallelMergeSort(vector_copy, kParallelThreadsCount);
+        ThreadsParallelMergeSort(vector_copy.begin(), vector_copy.end(), kParallelThreadsCount);
     }
 
     return 0;
